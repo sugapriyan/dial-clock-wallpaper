@@ -98,7 +98,7 @@ class ClockRenderer(private val ctx: Context) {
         // ---- layout ----
         val u = min(W, H * 0.62f)
         val cx = W / 2 - 0.045f * u
-        val cy = H * 0.53f
+        val cy = H * 0.17f + 0.56f * u
         val rMin = 0.14f * u
         val rSec = 0.27f * u
 
