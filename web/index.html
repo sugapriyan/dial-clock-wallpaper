@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Dial Clock Wallpaper</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#0d141c;
+    font-family:Outfit,system-ui,sans-serif;-webkit-user-select:none;user-select:none;
+    -webkit-tap-highlight-color:transparent;touch-action:manipulation}
+  #bg{position:fixed;inset:0;background-size:cover;background-position:center}
+  #dim{position:fixed;inset:0;background:#000;opacity:0}
+  canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+  #gear{position:fixed;right:14px;bottom:calc(14px + env(safe-area-inset-bottom));
+    width:38px;height:38px;border-radius:50%;border:none;background:rgba(255,255,255,.08);
+    color:rgba(255,255,255,.55);font-size:18px;line-height:38px;padding:0;cursor:pointer}
+  #panel{position:fixed;left:0;right:0;bottom:0;max-height:78vh;overflow:auto;
+    background:rgba(18,22,28,.97);color:#e8edf2;border-radius:20px 20px 0 0;
+    padding:18px 16px calc(22px + env(safe-area-inset-bottom));box-sizing:border-box;
+    transform:translateY(105%);transition:transform .3s ease;font-size:15px;
+    box-shadow:0 -10px 40px rgba(0,0,0,.5)}
+  #panel.open{transform:none}
+  #panel h2{margin:0 0 14px;font-weight:600;font-size:18px;display:flex;justify-content:space-between;align-items:center}
+  #panel h2 button{background:none;border:none;color:#9aa6b2;font-size:22px;cursor:pointer}
+  .row{margin:0 0 18px}
+  .lbl{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#8b97a3;margin-bottom:8px}
+  .sw{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  .dot{width:34px;height:34px;border-radius:50%;border:2px solid rgba(255,255,255,.15);cursor:pointer;padding:0}
+  .dot.on{border-color:#fff;box-shadow:0 0 0 2px rgba(255,255,255,.25)}
+  input[type=color]{width:38px;height:38px;border:none;background:none;padding:0;cursor:pointer}
+  .btn{background:#26303a;color:#e8edf2;border:none;border-radius:10px;padding:10px 14px;font:inherit;cursor:pointer}
+  .seg{display:inline-flex;background:#26303a;border-radius:10px;padding:3px}
+  .seg button{background:none;border:none;color:#aab4be;padding:8px 16px;border-radius:8px;font:inherit;cursor:pointer}
+  .seg button.on{background:#e8edf2;color:#111}
+  input[type=range]{width:100%}
+  .note{font-size:12px;color:#8b97a3;margin-top:6px}
+  label.chk{display:flex;gap:10px;align-items:center}
+</style>
+</head>
+<body>
+<div id="bg"></div>
+<div id="dim"></div>
+<canvas id="c"></canvas>
+<button id="gear" aria-label="Settings">⚙</button>
+
+<div id="panel" role="dialog" aria-label="Wallpaper settings">
+  <h2>Customise <button id="close" aria-label="Close">×</button></h2>
+
+  <div class="row">
+    <div class="lbl">Background image</div>
+    <div class="sw">
+      <button class="btn" id="pick">Choose image</button>
+      <button class="btn" id="clearImg">Remove</button>
+      <input type="file" id="file" accept="image/*" hidden>
+    </div>
+    <div class="note" id="imgNote"></div>
+  </div>
+
+  <div class="row">
+    <div class="lbl">Image dimming</div>
+    <input type="range" id="dimR" min="0" max="0.85" step="0.05">
+  </div>
+
+  <div class="row">
+    <div class="lbl">Background colour</div>
+    <div class="sw" id="bgSw"></div>
+  </div>
+
+  <div class="row">
+    <div class="lbl">Accent / theme colour</div>
+    <div class="sw" id="acSw"></div>
+  </div>
+
+  <div class="row">
+    <div class="lbl">Time format</div>
+    <div class="seg"><button data-f="12">12 hr</button><button data-f="24">24 hr</button></div>
+  </div>
+
+  <div class="row">
+    <label class="chk"><input type="checkbox" id="hideGear"> Hide ⚙ button (double-tap screen to open settings)</label>
+  </div>
+</div>
+
+<script>
+/* Default settings – you can also edit these directly. */
+const CONFIG = {
+  accent: '#ffffff',
+  bgColor: '#0d141c',
+  bgImage: '',        // e.g. 'my-photo.jpg' placed next to this file
+  dim: 0.35,
+  hour24: false,
+  hideGear: false
+};
+
+const KEY = 'dialclock.v1';
+const S = Object.assign({}, CONFIG);
+try { const s = JSON.parse(localStorage.getItem(KEY) || 'null'); if (s) Object.assign(S, s); } catch (e) {}
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify(S)); return true; }
+  catch (e) { return false; }
+}
+
+const $ = id => document.getElementById(id);
+const bg = $('bg'), dim = $('dim'), gear = $('gear'), panel = $('panel');
+
+function applyBg() {
+  document.body.style.background = S.bgColor;
+  bg.style.backgroundImage = S.bgImage ? `url("${S.bgImage}")` : 'none';
+  dim.style.opacity = S.bgImage ? S.dim : 0;
+  gear.style.display = S.hideGear ? 'none' : 'block';
+}
+
+/* ---------- Settings UI ---------- */
+const ACCENTS = ['#ffffff', '#7dd3fc', '#fbbf24', '#f472b6', '#86efac', '#c4b5fd', '#fb923c', '#f87171'];
+const BGS = ['#0d141c', '#000000', '#1a1a2e', '#0f2a24', '#2b1a12', '#2a1030'];
+
+function swatches(el, list, key) {
+  el.innerHTML = '';
+  list.forEach(c => {
+    const b = document.createElement('button');
+    b.className = 'dot' + (S[key].toLowerCase() === c ? ' on' : '');
+    b.style.background = c;
+    b.onclick = () => { S[key] = c; save(); applyBg(); refreshUI(); };
+    el.appendChild(b);
+  });
+  const p = document.createElement('input');
+  p.type = 'color'; p.value = S[key];
+  p.oninput = () => { S[key] = p.value; save(); applyBg(); };
+  p.onchange = refreshUI;
+  el.appendChild(p);
+}
+function refreshUI() {
+  swatches($('bgSw'), BGS, 'bgColor');
+  swatches($('acSw'), ACCENTS, 'accent');
+  document.querySelectorAll('.seg button').forEach(b =>
+    b.classList.toggle('on', (b.dataset.f === '24') === S.hour24));
+  $('dimR').value = S.dim;
+  $('hideGear').checked = S.hideGear;
+}
+document.querySelectorAll('.seg button').forEach(b =>
+  b.onclick = () => { S.hour24 = b.dataset.f === '24'; save(); refreshUI(); });
+$('dimR').oninput = e => { S.dim = +e.target.value; save(); applyBg(); };
+$('hideGear').onchange = e => { S.hideGear = e.target.checked; save(); applyBg(); };
+$('pick').onclick = () => $('file').click();
+$('clearImg').onclick = () => { S.bgImage = ''; save(); applyBg(); $('imgNote').textContent = ''; };
+$('file').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  const img = new Image();
+  img.onload = () => {
+    const max = 1600, k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    S.bgImage = c.toDataURL('image/jpeg', 0.85);
+    URL.revokeObjectURL(img.src);
+    applyBg();
+    $('imgNote').textContent = save() ? 'Saved.' : 'Shown now, but too large to remember after restart.';
+  };
+  img.src = URL.createObjectURL(f);
+  e.target.value = '';
+};
+const openPanel = () => { refreshUI(); panel.classList.add('open'); };
+gear.onclick = openPanel;
+$('close').onclick = () => panel.classList.remove('open');
+let lastTap = 0;
+$('c').addEventListener('pointerup', () => {
+  const t = Date.now();
+  if (t - lastTap < 350) openPanel();
+  lastTap = t;
+});
+
+/* ---------- Clock ---------- */
+const cv = $('c'), ctx = cv.getContext('2d');
+let W, H, dpr;
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 3);
+  W = innerWidth; H = innerHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+addEventListener('resize', resize);
+
+const pad = n => String(n).padStart(2, '0');
+const wrap = d => ((d % 60) + 90) % 60 - 30;   // shortest signed distance on 60-dial
+const FONT = 'Outfit, system-ui, sans-serif';
+const DAYS = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+const MONS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+
+function hexA(hex, a) {
+  let h = hex.replace('#', '');
+  if (h.length === 3) h = h.split('').map(x => x + x).join('');
+  const n = parseInt(h, 16);
+  return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`;
+}
+function rrect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.arc(x + w - r, y + r, r, -Math.PI / 2, 0);
+  ctx.lineTo(x + w, y + h - r); ctx.arc(x + w - r, y + h - r, r, 0, Math.PI / 2);
+  ctx.lineTo(x + r, y + h); ctx.arc(x + r, y + h - r, r, Math.PI / 2, Math.PI);
+  ctx.lineTo(x, y + r); ctx.arc(x + r, y + r, r, Math.PI, Math.PI * 1.5);
+  ctx.closePath();
+}
+
+let shownMin = null;
+
+const clamp01 = v => Math.max(0, Math.min(1, v));
+
+/* hideInside = true: labels vanish inside the pill (minute ring).
+   hideInside = false: labels may sit inside the pill, but fade while crossing its edge (seconds ring). */
+function ring(cx, cy, u, r, cur, fs, hideInside, halfH) {
+  ctx.font = `400 ${fs}px ${FONT}`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const soft = 0.02 * u;
+  for (let i = 0; i < 60; i++) {
+    const delta = wrap(i - cur);
+    const a = delta * Math.PI / 30;
+    const c = Math.cos(a), s = Math.sin(a);
+    const vis = Math.pow(clamp01((c + 0.2) / 1.2), 1.6);   // only the right half is visible
+    if (vis < 0.01) continue;
+    const major = i % 5 === 0;
+    const onRight = c > 0;
+
+    // ticks: never drawn inside / across the pill
+    const t0 = r + 0.045 * u, t1 = t0 + (major ? 0.028 : 0.014) * u;
+    const tickDy = Math.abs(s) * t0;
+    const tickF = onRight ? clamp01((tickDy - halfH - 0.012 * u) / soft) : 1;
+    if (tickF > 0) {
+      ctx.strokeStyle = `rgba(255,255,255,${vis * tickF * (major ? 0.75 : 0.35)})`;
+      ctx.lineWidth = Math.max(1, (major ? 0.0045 : 0.003) * u);
+      ctx.beginPath();
+      ctx.moveTo(cx + c * t0, cy - s * t0);
+      ctx.lineTo(cx + c * t1, cy - s * t1);
+      ctx.stroke();
+    }
+
+    const dy = Math.abs(s) * r;
+    const outer = halfH + fs * 0.6 + 0.008 * u;
+    const inner = halfH - fs * 0.6;
+    // inside the pill only the current second shows; neighbours cross-fade as the ring steps
+    const step = r * Math.PI / 30;
+    const fIn = (!hideInside && onRight) ? clamp01(1 - dy / (0.75 * step)) : 0;
+
+    if (!major) {
+      // every number is shown inside the pill (seconds ring only)
+      if (fIn <= 0.01) continue;
+      const focus = 1 - clamp01(dy / inner) * 0.7;   // centred number is brightest
+      ctx.fillStyle = `rgba(255,255,255,${fIn * focus})`;
+      ctx.fillText(pad(i), cx + c * r, cy - s * r);
+      continue;
+    }
+
+    let f = 1;
+    if (onRight) {
+      const fOut = clamp01((dy - outer) / soft);
+      f = Math.max(fOut, fIn);
+    }
+    if (f <= 0.01) continue;
+    const focus = fIn > 0 ? 1 - clamp01(dy / inner) * 0.7 : 0.85;
+    ctx.fillStyle = `rgba(255,255,255,${vis * f * focus})`;
+    ctx.fillText(pad(i), cx + c * r, cy - s * r);
+  }
+}
+
+function frame() {
+  const now = new Date();
+  const sec = now.getSeconds() + now.getMilliseconds() / 1000;
+  const min = now.getMinutes();
+  // seconds ring ticks one step per second with a quick ease, so the current second sits centred
+  const ss = now.getSeconds(), ms = now.getMilliseconds();
+  const ease = t => 1 - Math.pow(1 - clamp01(t), 3);
+  const secPos = (ss - 1 + ease(ms / 300) + 60) % 60;
+  if (shownMin === null) shownMin = min;
+  const d = wrap(min - shownMin);
+  shownMin = Math.abs(d) < 0.002 ? min : (shownMin + d * 0.12 + 60) % 60;
+
+  ctx.clearRect(0, 0, W, H);
+  const u = Math.min(W, H * 0.62);
+  // dial sits just below the date, with a small gap
+  const cx = W / 2 - 0.045 * u, cy = H * 0.17 + 0.56 * u;
+  const rMin = 0.14 * u, rSec = 0.27 * u;
+
+  // highlight pill
+  const px0 = cx + rMin - 0.075 * u, px1 = cx + rSec + 0.06 * u, ph = 0.11 * u;
+  rrect(px0, cy - ph / 2, px1 - px0, ph, ph / 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fill();
+  ctx.strokeStyle = S.accent; ctx.lineWidth = Math.max(1.5, 0.006 * u); ctx.stroke();
+
+  // rotating rings (kept clear of the pill)
+  ring(cx, cy, u, rSec, secPos, 0.036 * u, false, ph / 2);
+  ring(cx, cy, u, rMin, shownMin, 0.042 * u, true, ph / 2);
+
+  // current minute inside pill
+  ctx.fillStyle = '#fff';
+  ctx.font = `600 ${0.072 * u}px ${FONT}`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(pad(min), cx + rMin, cy + 0.003 * u);
+
+  // hour
+  let h = now.getHours();
+  const ampm = h < 12 ? 'AM' : 'PM';
+  if (!S.hour24) h = h % 12 || 12;
+  ctx.textAlign = 'right';
+  ctx.font = `500 ${0.19 * u}px ${FONT}`;
+  ctx.fillText(pad(h), cx - 0.03 * u, cy + 0.008 * u);
+  if (!S.hour24) {
+    ctx.font = `500 ${0.034 * u}px ${FONT}`;
+    ctx.fillStyle = hexA(S.accent, 0.9);
+    if ('letterSpacing' in ctx) ctx.letterSpacing = `${0.008 * u}px`;
+    ctx.fillText(ampm, cx - 0.035 * u, cy + 0.13 * u);
+    if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+  }
+
+  // day + date in top space
+  const ty = H * 0.17;
+  ctx.textAlign = 'center';
+  if ('letterSpacing' in ctx) ctx.letterSpacing = `${0.012 * u}px`;
+  ctx.fillStyle = S.accent;
+  ctx.font = `600 ${0.07 * u}px ${FONT}`;
+  ctx.fillText(DAYS[now.getDay()], W / 2, ty);
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  ctx.font = `400 ${0.042 * u}px ${FONT}`;
+  if ('letterSpacing' in ctx) ctx.letterSpacing = `${0.016 * u}px`;
+  ctx.fillText(`${pad(now.getDate())} ${MONS[now.getMonth()]} ${now.getFullYear()}`, W / 2, ty + 0.08 * u);
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+
+  requestAnimationFrame(frame);
+}
+
+resize(); applyBg(); refreshUI();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
